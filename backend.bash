@@ -1,8 +1,6 @@
 npm init -y
-npm install express socket.io cors
-npm install mysql2
-npm install express socket.io bcrypt jsonwebtoken cors
-npm install dotenv
-npm install express socket.io mysql2 bcrypt jsonwebtoken cors
+npm install express socket.io cors mysql2 bcrypt jsonwebtoken dotenv
+npm install --save-dev nodemon
 node server.js
+
 
