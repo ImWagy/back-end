@@ -101,9 +101,13 @@ io.on("connection", (socket) => {
   onlineUsers[socket.id] = username;
   io.emit("userCount", Object.keys(onlineUsers).length);
 
-  socket.on("chatMessage", (data) => {
-    await db.query("INSERT INTO messages (username, message) VALUES (?, ?)", [username, data.message]);
-    io.emit("chatMessage", { username, message: data.message });
+  socket.on("chatMessage", async (data) => {
+    try {
+      await db.query("INSERT INTO messages (username, message) VALUES (?, ?)", [username, data.message]);
+      io.emit("chatMessage", { username, message: data.message });
+    } catch (err) {
+      console.error("Fejl ved indsættelse af besked:", err);
+    }
   });
 
   socket.on("disconnect", () => {
@@ -117,9 +121,11 @@ server.listen(PORT, () => console.log(`Server kører på port ${PORT}`));
 
 //------------------- ENDPOINT --------------------
 app.get("/messages", async (req, res) => {
-  const [rows] = await db.query("SELECT * FROM messages ORDER BY timestamp ASC LIMIT 100");
-  res.json(rows);
+  try {
+    const [rows] = await db.query("SELECT * FROM messages ORDER BY timestamp ASC LIMIT 100");
+    res.json(rows);
+  } catch (err) {
+    console.error("Fejl ved hentning af beskeder:", err);
+    res.status(500).send("Database error");
+  }
 });
-
-
-
