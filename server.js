@@ -8,8 +8,14 @@ const cors = require("cors");
 
 const app = express();
 const server = http.createServer(app);
+
+const allowedOrigins = ["https://hustruhurlumhej.dk", "http://hustruhurlumhej.dk"];
+
 const io = new Server(server, {
-  cors: { origin: "https://hustruhurlumhej.dk", methods: ["GET", "POST"] }
+  cors: {
+    origin: allowedOrigins,
+    methods: ["GET", "POST"]
+  }
 });
 
 const PORT = process.env.PORT || 3000;
@@ -17,9 +23,16 @@ const JWT_SECRET = "DIT_HEMMELIGE_SECRET"; // Skift til noget sikkert
 
 // Middleware
 app.use(cors({
-  origin: "https://hustruhurlumhej.dk",
+  origin: function(origin, callback) {
+    if (!origin) return callback(null, true); // tillad requests uden origin (fx curl)
+    if (allowedOrigins.indexOf(origin) === -1) {
+      return callback(new Error("CORS policy violation"), false);
+    }
+    return callback(null, true);
+  },
   methods: ["GET", "POST"]
 }));
+
 app.use(express.json());
 
 // ------------------ MySQL connection ------------------
@@ -100,3 +113,4 @@ io.on("connection", (socket) => {
 
 // ------------------ START SERVER ------------------
 server.listen(PORT, () => console.log(`Server kører på port ${PORT}`));
+
