@@ -102,6 +102,7 @@ io.on("connection", (socket) => {
   io.emit("userCount", Object.keys(onlineUsers).length);
 
   socket.on("chatMessage", (data) => {
+    await db.query("INSERT INTO messages (username, message) VALUES (?, ?)", [username, data.message]);
     io.emit("chatMessage", { username, message: data.message });
   });
 
@@ -113,4 +114,12 @@ io.on("connection", (socket) => {
 
 // ------------------ START SERVER ------------------
 server.listen(PORT, () => console.log(`Server kører på port ${PORT}`));
+
+//------------------- ENDPOINT --------------------
+app.get("/messages", async (req, res) => {
+  const [rows] = await db.query("SELECT * FROM messages ORDER BY timestamp ASC LIMIT 100");
+  res.json(rows);
+});
+
+
 
