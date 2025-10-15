@@ -101,6 +101,11 @@ io.on("connection", (socket) => {
   onlineUsers[socket.id] = username;
   io.emit("userCount", Object.keys(onlineUsers).length);
 
+  // --- Typing status ---
+  socket.on("typing", () => {
+    socket.broadcast.emit("userTyping", username);
+  });
+
   socket.on("chatMessage", async (data) => {
     try {
       await db.query("INSERT INTO messages (username, message) VALUES (?, ?)", [username, data.message]);
