@@ -9,7 +9,12 @@ const cors = require("cors");
 const app = express();
 const server = http.createServer(app);
 
-const allowedOrigins = ["https://hustruhurlumhej.dk", "http://hustruhurlumhej.dk"];
+const allowedOrigins = [
+  "https://hustruhurlumhej.dk",
+  "http://hustruhurlumhej.dk",
+  "https://back-end-production-52e4.up.railway.app",
+  "https://back-end-production-52e4.up.railway.app/"
+];
 
 const io = new Server(server, {
   cors: {
@@ -21,10 +26,10 @@ const io = new Server(server, {
 const PORT = process.env.PORT || 3000;
 const JWT_SECRET = "DIT_HEMMELIGE_SECRET"; // Skift til noget sikkert
 
-// Middleware
+// ------------------ Middleware ------------------
 app.use(cors({
   origin: function(origin, callback) {
-    if (!origin) return callback(null, true); // tillad requests uden origin (fx curl)
+    if (!origin) return callback(null, true);
     if (allowedOrigins.indexOf(origin) === -1) {
       return callback(new Error("CORS policy violation"), false);
     }
@@ -32,10 +37,9 @@ app.use(cors({
   },
   methods: ["GET", "POST"]
 }));
-
 app.use(express.json());
 
-// ------------------ MySQL connection ------------------
+// ------------------ MySQL-forbindelse ------------------
 const db = mysql.createPool({
   host: "mysql20.unoeuro.com",
   user: "hustruhurlumhej_dk",
@@ -43,7 +47,23 @@ const db = mysql.createPool({
   database: "hustruhurlumhej_dk_db"
 });
 
-// ------------------ REST ENDPOINTS ------------------
+// ------------------ DATABASE SETUP ------------------
+// Sørg for at have tabellerne i databasen:
+// 
+// CREATE TABLE users (
+//   id INT AUTO_INCREMENT PRIMARY KEY,
+//   username VARCHAR(100) UNIQUE,
+//   password_hash VARCHAR(255)
+// );
+//
+// CREATE TABLE messages (
+//   id INT AUTO_INCREMENT PRIMARY KEY,
+//   username VARCHAR(100),
+//   message TEXT,
+//   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+// );
+
+// ------------------ ENDPOINTS ------------------
 
 // Register
 app.post("/register", async (req, res) => {
@@ -53,10 +73,7 @@ app.post("/register", async (req, res) => {
   const hashed = await bcrypt.hash(password, 10);
 
   try {
-    await db.query(
-      "INSERT INTO users (username, password_hash) VALUES (?, ?)",
-      [username, hashed]
-    );
+    await db.query("INSERT INTO users (username, password_hash) VALUES (?, ?)", [username, hashed]);
     res.status(201).send("User created");
   } catch (e) {
     if (e.code === "ER_DUP_ENTRY") return res.status(409).send("Username already exists");
@@ -69,7 +86,6 @@ app.post("/register", async (req, res) => {
 app.post("/login", async (req, res) => {
   const { username, password } = req.body;
   const [rows] = await db.query("SELECT * FROM users WHERE username = ?", [username]);
-
   if (rows.length === 0) return res.status(401).send("Invalid credentials");
 
   const user = rows[0];
@@ -80,13 +96,23 @@ app.post("/login", async (req, res) => {
   res.json({ token, username: user.username });
 });
 
+// Hent tidligere beskeder
+app.get("/messages", async (req, res) => {
+  try {
+    const [rows] = await db.query("SELECT username, message, created_at FROM messages ORDER BY id ASC LIMIT 100");
+    res.json(rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).send("Fejl ved hentning af beskeder");
+  }
+});
+
 // ------------------ SOCKET.IO ------------------
 let onlineUsers = {};
 
 io.use((socket, next) => {
   const token = socket.handshake.auth.token;
   if (!token) return next(new Error("Authentication error"));
-
   try {
     const payload = jwt.verify(token, JWT_SECRET);
     socket.user = payload;
@@ -99,15 +125,38 @@ io.use((socket, next) => {
 io.on("connection", (socket) => {
   const username = socket.user.username;
   onlineUsers[socket.id] = username;
+
+  // Opdater antal online brugere
   io.emit("userCount", Object.keys(onlineUsers).length);
 
-  socket.on("chatMessage", (data) => {
-    io.emit("chatMessage", { username, message: data.message });
+  console.log(`${username} forbundet`);
+
+  // Modtag besked
+  socket.on("chatMessage", async (data) => {
+    const msg = data.message.trim();
+    if (!msg) return;
+
+    // Gem i databasen
+    try {
+      await db.query("INSERT INTO messages (username, message) VALUES (?, ?)", [username, msg]);
+    } catch (err) {
+      console.error("Fejl ved gemning af besked:", err);
+    }
+
+    // Send ud til alle
+    io.emit("chatMessage", { username, message: msg });
   });
 
+  // Typing event
+  socket.on("typing", () => {
+    socket.broadcast.emit("userTyping", username);
+  });
+
+  // Disconnect
   socket.on("disconnect", () => {
     delete onlineUsers[socket.id];
     io.emit("userCount", Object.keys(onlineUsers).length);
+    console.log(`${username} afbrød forbindelsen`);
   });
 });
 
