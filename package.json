@@ -1,21 +1,14 @@
 {
-  "name": "root",
-  "private": true,
-  "workspaces": {
-    "packages": [
-      "packages/dicebear",
-      "packages/@dicebear/*",
-      "apps/*"
-    ]
-  },
+  "name": "chat-backend",
+  "version": "1.0.0",
+  "main": "server.js",
+  "type": "module",
   "scripts": {
-    "build": "lerna run build",
-    "test": "lerna run test",
-    "prepare-publish": "lerna version --force-publish --exact",
-    "prettier": "prettier --write \"{packages,apps}/**/*.{js,ts,json,md}\""
+    "start": "node server.js"
   },
-  "devDependencies": {
-    "lerna": "^8.2.2",
-    "prettier": "^3.5.3"
+  "dependencies": {
+    "express": "^4.19.0",
+    "socket.io": "^4.7.5",
+    "cors": "^2.8.5"
   }
 }
