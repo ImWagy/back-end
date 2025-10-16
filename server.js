@@ -47,15 +47,6 @@ const db = mysql.createPool({
   database: "hustruhurlumhej_dk_db"
 });
 
-// ------------------ DATABASE SETUP ------------------
-//
-// Tilføj evt. IP-kolonner i databasen:
-//
-// ALTER TABLE users ADD COLUMN last_ip VARCHAR(100) NULL;
-// ALTER TABLE messages ADD COLUMN ip VARCHAR(100) NULL;
-//
-//
-
 // ------------------ ENDPOINTS ------------------
 
 // Register
@@ -91,17 +82,6 @@ app.post("/login", async (req, res) => {
   const user = rows[0];
   const match = await bcrypt.compare(password, user.password_hash);
   if (!match) return res.status(401).send("Invalid credentials");
-
-  // 👇 NYT: Hent IP-adresse
-  const ip = req.headers["x-forwarded-for"] || req.socket.remoteAddress;
-  console.log(`[LOGIN] ${username} fra IP ${ip}`);
-
-  // 👇 NYT: Gem sidste IP i databasen
-  try {
-    await db.query("UPDATE users SET last_ip = ? WHERE id = ?", [ip, user.id]);
-  } catch (err) {
-    console.error("Kunne ikke opdatere IP:", err);
-  }
 
   const token = jwt.sign(
     { id: user.id, username: user.username },
@@ -143,10 +123,6 @@ io.on("connection", (socket) => {
   const username = socket.user.username;
   onlineUsers[socket.id] = username;
 
-  // 👇 NYT: Find IP fra socket
-  const ip = socket.handshake.headers["x-forwarded-for"] || socket.handshake.address;
-  console.log(`[CONNECT] ${username} tilsluttede sig fra IP ${ip}`);
-
   io.emit("userCount", Object.keys(onlineUsers).length);
 
   // Modtag besked
@@ -154,11 +130,10 @@ io.on("connection", (socket) => {
     const msg = data.message.trim();
     if (!msg) return;
 
-    // 👇 NYT: Gem IP sammen med besked
     try {
       await db.query(
-        "INSERT INTO messages (username, message, ip) VALUES (?, ?, ?)",
-        [username, msg, ip]
+        "INSERT INTO messages (username, message) VALUES (?, ?)",
+        [username, msg]
       );
     } catch (err) {
       console.error("Fejl ved gemning af besked:", err);
@@ -176,7 +151,7 @@ io.on("connection", (socket) => {
   socket.on("disconnect", () => {
     delete onlineUsers[socket.id];
     io.emit("userCount", Object.keys(onlineUsers).length);
-    console.log(`${username} afbrød forbindelsen (${ip})`);
+    console.log(`${username} afbrød forbindelsen`);
   });
 });
 
