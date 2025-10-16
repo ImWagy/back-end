@@ -28,7 +28,7 @@ const JWT_SECRET = "DIT_HEMMELIGE_SECRET"; // Skift til noget sikkert
 
 // ------------------ Middleware ------------------
 app.use(cors({
-  origin: function(origin, callback) {
+  origin: function (origin, callback) {
     if (!origin) return callback(null, true);
     if (allowedOrigins.indexOf(origin) === -1) {
       return callback(new Error("CORS policy violation"), false);
@@ -48,35 +48,33 @@ const db = mysql.createPool({
 });
 
 // ------------------ DATABASE SETUP ------------------
-// Sørg for at have tabellerne i databasen:
-// 
-// CREATE TABLE users (
-//   id INT AUTO_INCREMENT PRIMARY KEY,
-//   username VARCHAR(100) UNIQUE,
-//   password_hash VARCHAR(255)
-// );
 //
-// CREATE TABLE messages (
-//   id INT AUTO_INCREMENT PRIMARY KEY,
-//   username VARCHAR(100),
-//   message TEXT,
-//   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-// );
+// Tilføj evt. IP-kolonner i databasen:
+//
+// ALTER TABLE users ADD COLUMN last_ip VARCHAR(100) NULL;
+// ALTER TABLE messages ADD COLUMN ip VARCHAR(100) NULL;
+//
+//
 
 // ------------------ ENDPOINTS ------------------
 
 // Register
 app.post("/register", async (req, res) => {
   const { username, password } = req.body;
-  if (!username || !password) return res.status(400).send("Missing username or password");
+  if (!username || !password)
+    return res.status(400).send("Missing username or password");
 
   const hashed = await bcrypt.hash(password, 10);
 
   try {
-    await db.query("INSERT INTO users (username, password_hash) VALUES (?, ?)", [username, hashed]);
+    await db.query("INSERT INTO users (username, password_hash) VALUES (?, ?)", [
+      username,
+      hashed
+    ]);
     res.status(201).send("User created");
   } catch (e) {
-    if (e.code === "ER_DUP_ENTRY") return res.status(409).send("Username already exists");
+    if (e.code === "ER_DUP_ENTRY")
+      return res.status(409).send("Username already exists");
     console.error(e);
     res.status(500).send("Database error");
   }
@@ -85,21 +83,40 @@ app.post("/register", async (req, res) => {
 // Login
 app.post("/login", async (req, res) => {
   const { username, password } = req.body;
-  const [rows] = await db.query("SELECT * FROM users WHERE username = ?", [username]);
+  const [rows] = await db.query("SELECT * FROM users WHERE username = ?", [
+    username
+  ]);
   if (rows.length === 0) return res.status(401).send("Invalid credentials");
 
   const user = rows[0];
   const match = await bcrypt.compare(password, user.password_hash);
   if (!match) return res.status(401).send("Invalid credentials");
 
-  const token = jwt.sign({ id: user.id, username: user.username }, JWT_SECRET, { expiresIn: "12h" });
+  // 👇 NYT: Hent IP-adresse
+  const ip = req.headers["x-forwarded-for"] || req.socket.remoteAddress;
+  console.log(`[LOGIN] ${username} fra IP ${ip}`);
+
+  // 👇 NYT: Gem sidste IP i databasen
+  try {
+    await db.query("UPDATE users SET last_ip = ? WHERE id = ?", [ip, user.id]);
+  } catch (err) {
+    console.error("Kunne ikke opdatere IP:", err);
+  }
+
+  const token = jwt.sign(
+    { id: user.id, username: user.username },
+    JWT_SECRET,
+    { expiresIn: "12h" }
+  );
   res.json({ token, username: user.username });
 });
 
 // Hent tidligere beskeder
 app.get("/messages", async (req, res) => {
   try {
-    const [rows] = await db.query("SELECT username, message, created_at FROM messages ORDER BY id ASC LIMIT 100");
+    const [rows] = await db.query(
+      "SELECT username, message, created_at FROM messages ORDER BY id ASC LIMIT 100"
+    );
     res.json(rows);
   } catch (err) {
     console.error(err);
@@ -126,24 +143,27 @@ io.on("connection", (socket) => {
   const username = socket.user.username;
   onlineUsers[socket.id] = username;
 
-  // Opdater antal online brugere
-  io.emit("userCount", Object.keys(onlineUsers).length);
+  // 👇 NYT: Find IP fra socket
+  const ip = socket.handshake.headers["x-forwarded-for"] || socket.handshake.address;
+  console.log(`[CONNECT] ${username} tilsluttede sig fra IP ${ip}`);
 
-  console.log(`${username} forbundet`);
+  io.emit("userCount", Object.keys(onlineUsers).length);
 
   // Modtag besked
   socket.on("chatMessage", async (data) => {
     const msg = data.message.trim();
     if (!msg) return;
 
-    // Gem i databasen
+    // 👇 NYT: Gem IP sammen med besked
     try {
-      await db.query("INSERT INTO messages (username, message) VALUES (?, ?)", [username, msg]);
+      await db.query(
+        "INSERT INTO messages (username, message, ip) VALUES (?, ?, ?)",
+        [username, msg, ip]
+      );
     } catch (err) {
       console.error("Fejl ved gemning af besked:", err);
     }
 
-    // Send ud til alle
     io.emit("chatMessage", { username, message: msg });
   });
 
@@ -156,7 +176,7 @@ io.on("connection", (socket) => {
   socket.on("disconnect", () => {
     delete onlineUsers[socket.id];
     io.emit("userCount", Object.keys(onlineUsers).length);
-    console.log(`${username} afbrød forbindelsen`);
+    console.log(`${username} afbrød forbindelsen (${ip})`);
   });
 });
 
