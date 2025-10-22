@@ -28,7 +28,7 @@ const JWT_SECRET = "DIT_HEMMELIGE_SECRET"; // Skift til noget sikkert
 
 // ------------------ Middleware ------------------
 app.use(cors({
-  origin: function (origin, callback) {
+  origin: function(origin, callback) {
     if (!origin) return callback(null, true);
     if (allowedOrigins.indexOf(origin) === -1) {
       return callback(new Error("CORS policy violation"), false);
@@ -52,20 +52,15 @@ const db = mysql.createPool({
 // Register
 app.post("/register", async (req, res) => {
   const { username, password } = req.body;
-  if (!username || !password)
-    return res.status(400).send("Missing username or password");
+  if (!username || !password) return res.status(400).send("Missing username or password");
 
   const hashed = await bcrypt.hash(password, 10);
 
   try {
-    await db.query("INSERT INTO users (username, password_hash) VALUES (?, ?)", [
-      username,
-      hashed
-    ]);
+    await db.query("INSERT INTO users (username, password_hash) VALUES (?, ?)", [username, hashed]);
     res.status(201).send("User created");
   } catch (e) {
-    if (e.code === "ER_DUP_ENTRY")
-      return res.status(409).send("Username already exists");
+    if (e.code === "ER_DUP_ENTRY") return res.status(409).send("Username already exists");
     console.error(e);
     res.status(500).send("Database error");
   }
@@ -74,29 +69,31 @@ app.post("/register", async (req, res) => {
 // Login
 app.post("/login", async (req, res) => {
   const { username, password } = req.body;
-  const [rows] = await db.query("SELECT * FROM users WHERE username = ?", [
-    username
-  ]);
+  const userIp = req.ip || req.connection.remoteAddress;  // Get the user's IP
+
+  const [rows] = await db.query("SELECT * FROM users WHERE username = ?", [username]);
   if (rows.length === 0) return res.status(401).send("Invalid credentials");
 
   const user = rows[0];
   const match = await bcrypt.compare(password, user.password_hash);
   if (!match) return res.status(401).send("Invalid credentials");
 
-  const token = jwt.sign(
-    { id: user.id, username: user.username },
-    JWT_SECRET,
-    { expiresIn: "12h" }
-  );
+  const token = jwt.sign({ id: user.id, username: user.username }, JWT_SECRET, { expiresIn: "12h" });
+
+  // Update the user's IP in the database
+  try {
+    await db.query("UPDATE users SET last_ip = ? WHERE id = ?", [userIp, user.id]);
+  } catch (err) {
+    console.error("Error updating IP address:", err);
+  }
+
   res.json({ token, username: user.username });
 });
 
 // Hent tidligere beskeder
 app.get("/messages", async (req, res) => {
   try {
-    const [rows] = await db.query(
-      "SELECT username, message, created_at FROM messages ORDER BY id ASC LIMIT 100"
-    );
+    const [rows] = await db.query("SELECT username, message, created_at FROM messages ORDER BY id ASC LIMIT 100");
     res.json(rows);
   } catch (err) {
     console.error(err);
@@ -123,22 +120,24 @@ io.on("connection", (socket) => {
   const username = socket.user.username;
   onlineUsers[socket.id] = username;
 
+  // Opdater antal online brugere
   io.emit("userCount", Object.keys(onlineUsers).length);
+
+  console.log(`${username} forbundet`);
 
   // Modtag besked
   socket.on("chatMessage", async (data) => {
     const msg = data.message.trim();
     if (!msg) return;
 
+    // Gem i databasen
     try {
-      await db.query(
-        "INSERT INTO messages (username, message) VALUES (?, ?)",
-        [username, msg]
-      );
+      await db.query("INSERT INTO messages (username, message) VALUES (?, ?)", [username, msg]);
     } catch (err) {
       console.error("Fejl ved gemning af besked:", err);
     }
 
+    // Send ud til alle
     io.emit("chatMessage", { username, message: msg });
   });
 
