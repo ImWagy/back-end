@@ -24,7 +24,7 @@ const io = new Server(server, {
 });
 
 const PORT = process.env.PORT || 3000;
-const JWT_SECRET = "DIT_HEMMELIGE_SECRET"; // Skift til noget sikkert
+const JWT_SECRET = "DIT_HEMMELIGE_SECRET"; // Change this to something secure
 
 // ------------------ Middleware ------------------
 app.use(cors({
@@ -39,7 +39,7 @@ app.use(cors({
 }));
 app.use(express.json());
 
-// ------------------ MySQL-forbindelse ------------------
+// ------------------ MySQL Connection ------------------
 const db = mysql.createPool({
   host: "mysql20.unoeuro.com",
   user: "hustruhurlumhej_dk",
@@ -69,7 +69,8 @@ app.post("/register", async (req, res) => {
 // Login
 app.post("/login", async (req, res) => {
   const { username, password } = req.body;
-  const userIp = req.ip || req.connection.remoteAddress;  // Get the user's IP
+  // Get the user's public IP address from headers (X-Forwarded-For for real IP)
+  const userIp = req.headers['x-forwarded-for'] || req.connection.remoteAddress || req.ip;
 
   const [rows] = await db.query("SELECT * FROM users WHERE username = ?", [username]);
   if (rows.length === 0) return res.status(401).send("Invalid credentials");
@@ -80,14 +81,14 @@ app.post("/login", async (req, res) => {
 
   const token = jwt.sign({ id: user.id, username: user.username }, JWT_SECRET, { expiresIn: "12h" });
 
-  // Update the user's IP in the database
+  // Store the IP address in the database
   try {
     await db.query("UPDATE users SET last_ip = ? WHERE id = ?", [userIp, user.id]);
   } catch (err) {
     console.error("Error updating IP address:", err);
   }
 
-  res.json({ token, username: user.username });
+  res.json({ token, username: user.username, ip: userIp }); // Send the IP along with the token
 });
 
 // Hent tidligere beskeder
